@@ -19,7 +19,6 @@ void Camera::Update(float deltaTime)
 
 	pos = { position };
 	up = { 0, 1, 0 };
-	look = { 0, 0, 0 };
 
 	// Set the yaw (Y axis), pitch (X axis), and roll (Z axis) rotations in radians.
 	pitch = glm::radians(rotation.x);

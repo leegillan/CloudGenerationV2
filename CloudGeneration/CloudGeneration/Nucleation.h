@@ -12,13 +12,17 @@ public:
 	void CalcWaterPressure();
 	double CalcNucleation(double t, double waterPress);
 
+	std::vector<float> GetDensity() { return dens; }
+	std::vector<float> GetTemperature() { return temp; }
+	std::vector<float> GetPressure() { return press; }
+	std::vector<double> GetWaterPressure() { return waterPress; }
 	std::vector<double> GetNucleation() { return nucleation; }
 
 private:
 	const float gamma = 7.0f / 5.0f;	//thermodynamics constant
 	double scaleHeight;					//scale height of atmosphere
 	double temperature;					//temperature at sea level (15C) in Kelvin
-	double pressure;						//pressure at sea level in pascals (Pa)
+	double pressure;					//pressure at sea level in pascals (Pa)
 	double density;						//rHo density at sea level (kg/m^3)
 
 	//nucleation variables

@@ -3,16 +3,20 @@
 #include <GL\glew.h>
 #include <GL\freeglut.h>
 
+
 #include "VertexBuffer.h"
 #include "IndexBuffer.h"
 #include "VertexArray.h"
+
 #include "Shader.h"
 #include "Texture.h"
 
 #include "Camera.h"
+#include "Input.h"
 #include "Nucleation.h"
 
 #include<vector>
+
 
 struct VertexArrayObject
 {
@@ -22,13 +26,14 @@ struct VertexArrayObject
 	IndexBuffer* iB;
 };
 
+
 class Scene
 {
 public:
 	Scene();
 
 	//Inititalises the class
-	void Init();
+	void Init(Input* in);
 
 	//Main render function
 	void Render(float dt, float timePassed);
@@ -37,7 +42,7 @@ public:
 	void Draw(float dt);
 
 	//Handle input function that receives delta time from parent.
-	//void HandleInput(float dt);
+	void HandleInput();
 
 	//Update function receives delta time from parent (used for frame independent updating).
 	void Update(float dt, float timePassed);
@@ -56,13 +61,15 @@ protected:
 
 	double randNum(double low, double high);
 
+	void RandomiseCloudLocations();
+	void ChangeCloudBoundaries();
+
 	VertexArrayObject InitPlane();
-	VertexArrayObject InitSphere(double r, int lats, int longs);
 
 	//class objects
 	Shader* basicShader;
-	Shader* basicShader2;
 	Camera* camera;
+	Input* input;
 	Texture* texture;
 	Nucleation* nuc;
 
@@ -71,18 +78,21 @@ protected:
 
 	//group of planes
 	std::vector<VertexArrayObject> planeObjects;
-	const static int numOfPlanes = 1000;
+	const static int numOfPlanes = 1500;
 	double randPosX[numOfPlanes];
 	double randPosY[numOfPlanes];
 
-	//group of spheres
-	std::vector<VertexArrayObject> sphereObjects;
-	const static int numOfSpheres = 100;
-	double randSpherePosX[numOfSpheres];
-	double randSpherePosY[numOfSpheres];
-
 	float randNumber[10];
 	int randTexture;
+
+	float boundaryX;
+	float boundaryY;
+
+	float heightDifference;
+
+	//background toggler
+	int bgToggle = 0;
+	glm::vec4 backgroundColour;
 
 	// For Window and frustum calculation.
 	int width = 0, height = 0;
@@ -93,6 +103,15 @@ protected:
 	char fps[40];
 	char mouseText[40];
 	char cameraPosText[40];
+
+	bool passTime;
+	char passTimeText[40];
+
+	//boundary text
+	char cloudBoundaries[40];
+
+	//camera location text
+	char cameraLoc[40];
 
 	//Shader variables
 	int location = 0;

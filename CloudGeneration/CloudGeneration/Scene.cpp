@@ -9,7 +9,9 @@ Scene::Scene()
 {
 	//OpenGL settings
 	glShadeModel(GL_SMOOTH);							// Enable Smooth Shading
-	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);				// Black Background
+	glDisable(GL_DEPTH_TEST);
+	glClearColor(0.0f, 0.3f, 0.8f, 1.0f);				// blue Background
+	//glClearColor(0.0f, 0.0f, 0.0f, 1.0f);				// Black Background
 	glClearDepth(1.0f);									// Depth Buffer Setup
 	glClearStencil(0);									// Clear stencil buffer
 	glEnable(GL_DEPTH_TEST);							// Enables Depth Testing
@@ -21,19 +23,25 @@ Scene::Scene()
 	//Blending
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	//glBlendFunc(GL_SRC_COLOR, GL_ONE_MINUS_SRC_COLOR);
 	glBlendEquation(GL_COMBINE);
 
 	/*glEnable(GL_ALPHA_TEST);
 	glAlphaFunc(GL_GREATER, 0.1f);*/
 }
 
-void Scene::Init()
+void Scene::Init(Input* in)
 {
+	input = in;
+
 	//camera setup 
 	camera = new Camera();
 	camera->SetProjectionMatrix(glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT), nearPlane, farPlane);
 	//put y to 1 to make it look like its above camera
-	camera->SetCameraPos(glm::vec3(0.0f, 0.0f, 9.f));
+	camera->SetCameraPos(glm::vec3(0.0f, 2.0f, 4.f));
+
+	boundaryX = 1;
+	boundaryY = 1;
 
 	//setup planes
 	for (int i = 0; i < numOfPlanes; i++)
@@ -41,27 +49,13 @@ void Scene::Init()
 		VertexArrayObject object = InitPlane();
 		planeObjects.push_back(object);
 
-		randPosX[i] = randNum(-2.f, 2.f);
-		randPosY[i] = randNum(-2.f, 2.f);
+		randPosX[i] = randNum(-boundaryX, boundaryX);
+		randPosY[i] = randNum(-boundaryY, boundaryY);
 
 		planeObjects[i].vA->Unbind();
 		planeObjects[i].vB->Unbind();
 		planeObjects[i].vB->Unbind();
 		planeObjects[i].iB->Unbind();
-	}
-
-	for (int i = 0; i < numOfSpheres; i++)
-	{
-		VertexArrayObject object = InitSphere(10.0f, 40.0f, 40.0f);
-		sphereObjects.push_back(object);
-
-		randSpherePosX[i] = randNum(-1.f, 1.f);
-		randSpherePosY[i] = randNum(-1.f, 1.f);
-
-		sphereObjects[i].vA->Unbind();
-		sphereObjects[i].vB->Unbind();
-		sphereObjects[i].vB->Unbind();
-		sphereObjects[i].iB->Unbind();
 	}
 
 	//shader setup
@@ -72,7 +66,7 @@ void Scene::Init()
 	texture->GenerateTexture2D(128, 128);
 
 	//texture setup for passing through shader
-	for (int i = 0; i < 2; i++)
+	for (int i = 0; i < 5; i++)
 	{
 		texture->Bind(i);
 
@@ -83,6 +77,9 @@ void Scene::Init()
 
 	//pass texture to shader
 	basicShader->SetUniform2f("uResolution", glm::vec2(GLUT_WINDOW_WIDTH, GLUT_WINDOW_HEIGHT));
+
+	backgroundColour = glm::vec4(0.0, 0.3f, 0.8f, 0.2);
+	basicShader->SetUniform4f("uColour", backgroundColour);
 
 	//texture setup for passing through shader
 	for (int i = 0; i < 10; i++)
@@ -100,20 +97,53 @@ void Scene::Init()
 	//Nucleation results tests
 	nucleation = nuc->GetNucleation();
 
+	std::cout << "This is the end. Onto normal nuc values" << std::endl;
+
 	for (int i = 0; i < 25; i++)
 	{
 		std::cout << nucleation[i] << std::endl;
-		std::cout << std::log(nucleation[i]) << std::endl;
 	}
 
+	std::cout << "This is the end. Onto normal range" << std::endl;
+
 	float deltaN = nucleation[24] - nucleation[1];
+
+	std::cout << deltaN << std::endl;
 
 	for (int j = 0; j < 24; j++)
 	{
 		nucleationRange[j] = (nucleation[j + 1] / deltaN);
-	
+
 		std::cout << nucleationRange[j] << std::endl;
 	}
+
+	//you end up with values ranging from 0 to 1 but with large bias towards 0^28
+
+	std::cout << "This is the end. Onto normal log nuc values" << std::endl;
+
+	for (int i = 0; i < 25; i++)
+	{
+		std::cout << std::log(nucleation[i]) / 100 << std::endl;
+	}
+
+	std::cout << "This is the end. Onto log range" << std::endl;
+
+	float logDeltaN = log(nucleation[24]) - log(nucleation[2]);
+
+	std::cout << logDeltaN << std::endl;
+
+	float logNucleationRange[25];
+
+	for (int j = 0; j < 24; j++)
+	{
+		logNucleationRange[j] = (log(nucleation[j + 1]) / logDeltaN);
+
+		std::cout << log(logNucleationRange[j]) << std::endl;
+	}
+
+	heightDifference = 0.001f;
+
+	passTime = true;
 }
 
 //update scene
@@ -122,10 +152,183 @@ void Scene::Update(float dt, float timePassed)
 	// Calculate FPS for output
 	CalculateFPS();
 
+	HandleInput();
+
 	//update camera
 	camera->Update(dt);
 
 	Render(dt, timePassed);
+}
+
+void Scene::HandleInput()
+{
+	//Camera positions and look
+
+	//looking up at clouds from below
+	if (input->isKeyDown('1'))
+	{
+		camera->SetCameraPos(glm::vec3(0.0f, 0.0f, 5.f));
+		camera->SetCameraLook(glm::vec3(0.0, 0.0, 0.0));
+	}
+
+	//looking up at clouds from below further back
+	if (input->isKeyDown('2'))
+	{
+		camera->SetCameraPos(glm::vec3(0.0f, 0.0f, 8.f));
+		camera->SetCameraLook(glm::vec3(0.0, 0.0, 0.0));
+	}
+
+	//looking up at clouds from below at an angle
+	if (input->isKeyDown('3'))
+	{
+		camera->SetCameraPos(glm::vec3(0.0f, 0.0f, 4.f));
+		camera->SetCameraLook(glm::vec3(0.0, -0.5, 0.0));
+	}
+
+	if (input->isKeyDown('q'))
+	{
+		camera->SetCameraLook(glm::vec3(camera->GetCameraLook().x , camera->GetCameraLook().y, camera->GetCameraLook().z + 0.1));
+	}
+
+	if (input->isKeyDown('z'))
+	{
+		camera->SetCameraLook(glm::vec3(camera->GetCameraLook().x, camera->GetCameraLook().y , camera->GetCameraLook().z - 0.1));
+	}
+
+	if (input->isKeyDown('w'))
+	{
+		camera->SetCameraPos(glm::vec3(camera->GetCameraPos().x, camera->GetCameraPos().y, camera->GetCameraPos().z - 0.1));
+	}
+
+	if (input->isKeyDown('s'))
+	{
+		camera->SetCameraPos(glm::vec3(camera->GetCameraPos().x, camera->GetCameraPos().y, camera->GetCameraPos().z + 0.1));
+	}
+
+	if (input->isKeyDown('a'))
+	{
+		camera->SetCameraPos(glm::vec3(camera->GetCameraPos().x - 0.1, camera->GetCameraPos().y, camera->GetCameraPos().z));
+	}
+
+	if (input->isKeyDown('d'))
+	{
+		camera->SetCameraPos(glm::vec3(camera->GetCameraPos().x + 0.1, camera->GetCameraPos().y, camera->GetCameraPos().z ));
+	}
+
+	if (input->isKeyDown(';'))
+	{
+		camera->SetCameraPos(glm::vec3(camera->GetCameraPos().x , camera->GetCameraPos().y + 0.1, camera->GetCameraPos().z));
+		camera->SetCameraLook(glm::vec3(camera->GetForward().x, camera->GetForward().y, camera->GetForward().z));
+	}
+
+	if (input->isKeyDown('p'))
+	{
+		camera->SetCameraPos(glm::vec3(camera->GetCameraPos().x, camera->GetCameraPos().y - 0.1, camera->GetCameraPos().z));
+
+		camera->SetCameraLook(glm::vec3(camera->GetForward().x, camera->GetForward().y, camera->GetForward().z));
+	}
+
+	if (input->isKeyDown('4'))
+	{
+		camera->SetCameraPos(glm::vec3(0.0f, 5.0f, 0.f));
+		camera->SetCameraLook(glm::vec3(camera->GetForward().x, camera->GetForward().y, camera->GetForward().z));
+	}
+
+	if (input->isKeyDown('5'))
+	{
+		camera->SetCameraPos(glm::vec3(0.0f, 5.0f, 3.f));
+		camera->SetCameraLook(glm::vec3(camera->GetForward().x, camera->GetForward().y, camera->GetForward().z));
+	}
+
+	if (input->isKeyDown('6'))
+	{
+		camera->SetCameraPos(glm::vec3(0.0f, 4.0f, 2.f));
+		camera->SetCameraLook(glm::vec3(camera->GetForward().x, camera->GetForward().y, camera->GetForward().z));
+	}
+
+	if (input->isKeyDown('7'))
+	{
+		camera->SetCameraPos(glm::vec3(0.0f, 3.0f, 3.f));
+		camera->SetCameraLook(glm::vec3(camera->GetForward().x, camera->GetForward().y, camera->GetForward().z));
+	}
+
+	if (input->isKeyDown('b'))
+	{
+		if (bgToggle == 1)
+		{
+			glClearColor(0.0f, 0.3f, 0.8f, 1.0f);	// blue Background
+			backgroundColour = glm::vec4(0., 0.3f, 0.8f, 0.2);
+			bgToggle = 0;
+		}
+		else if (bgToggle == 0)
+		{
+			glClearColor(0.0f, 0.0f, 0.0f, 1.0f);	// black Background
+			backgroundColour = glm::vec4(0., 0.0f, 0.0f, 0.2);
+			bgToggle = 1;
+		}
+		
+		input->SetKeyUp('b');
+	}
+
+	if(input->isKeyDown('r'))
+	{
+		RandomiseCloudLocations();	
+	}
+	
+	ChangeCloudBoundaries();
+
+	if (input->isKeyDown('h'))
+	{
+		heightDifference += 0.0001f;
+	}
+
+	if (input->isKeyDown('n'))
+	{
+		heightDifference -= 0.0001f;
+	}
+
+	if (input->isKeyDown('t'))
+	{
+		passTime = !passTime;
+		input->SetKeyUp('t');
+	}
+
+}
+
+void Scene::RandomiseCloudLocations()
+{
+	for (int i = 0; i < numOfPlanes; i++)
+	{
+		randPosX[i] = randNum(-boundaryX, boundaryX);
+		randPosY[i] = randNum(-boundaryY, boundaryY);
+	}
+}
+
+void Scene::ChangeCloudBoundaries()
+{
+	if (input->isKeyDown('i'))
+	{
+		boundaryX += 0.01f;
+		RandomiseCloudLocations();
+	}
+
+	if (input->isKeyDown('o') && boundaryX >= 0.01f)
+	{
+		boundaryX -= 0.01f;
+		RandomiseCloudLocations();
+	}
+
+	if (input->isKeyDown('-'))
+	{
+		boundaryY += 0.01f;
+		RandomiseCloudLocations();
+	}
+
+	if (input->isKeyDown('=') && boundaryY >= 0.01f)
+	{
+		boundaryY -= 0.01f;
+		RandomiseCloudLocations();
+	}
 }
 
 //render scene
@@ -137,14 +340,17 @@ void Scene::Render(float dt, float timePassed)
 	// Reset transformations
 	glLoadIdentity();
 
-	camera->SetCameraLook(glm::vec3(camera->GetForward().x, camera->GetForward().y, camera->GetForward().z));
-
+	//camera->SetCameraLook(glm::vec3(camera->GetForward().x, camera->GetForward().y, camera->GetForward().z));
 	//camera->SetCameraLook(glm::vec3(camera->GetForward().x, -4.0, camera->GetForward().z));
+
+	camera->SetCameraLook(camera->GetCameraLook());
 
 	//set the new view matrix for updating
 	camera->SetViewMatrix();
 
 	//glPolygonMode(GL_FRONT, GL_LINE);
+
+	basicShader->Bind(); //Bind shader
 
 	Draw(timePassed);
 
@@ -159,97 +365,84 @@ void Scene::Render(float dt, float timePassed)
 
 void Scene::Draw(float timePassed)
 {
-	basicShader->Bind(); //Bind shader
-
 	basicShader->SetUniformMat4("viewMatrix", camera->GetViewMatrix());
 	basicShader->SetUniformMat4("projectionMatrix", camera->GetProjectionMatrix());
 
 	basicShader->SetUniform1f("curNucVal", 0.01);
 	basicShader->SetUniform1f("nextNucVal", 0.01);
+	basicShader->SetUniform4f("uColour", backgroundColour);
 
-	//Planes 2D
-	float height = -0.5f;
-	float altitudeCheck = 0.0f;
-
-	int textureID = 0;
-
+	if (passTime == false)
 	{
-		//for (int j = 0; j < 10; j++)
-		//{
-		//	for (int k = 0; k < 10; k++)
-		//	{
-		//		//Pass time passed to shader
-		//		basicShader->SetUniform1f("uTime", timePassed);
-
-		//		texture->Bind(0);
-
-		//		basicShader->SetUniform1i("uTexture" + std::to_string(textureCount), textureCount);
-		//		basicShader->SetUniform1i("usingTex1", tex1);
-
-		//		basicShader->SetUniform1f("curNucVal", 0.02);
-		//		basicShader->SetUniform1f("nextNucVal", 0.02);
-
-		//		glm::mat4 modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(j - 4.5, k - 4.5, 2.0f));
-
-		//		basicShader->SetUniformMat4("modelMatrix", modelMatrix);
-
-		//		planeObjects[j+k].vA->Bind(); //Bind vertex buffer
-		//		planeObjects[j + k].iB->Bind(); //Bind index buffer
-
-		//		glPushMatrix();
-		//		glDrawElements(GL_TRIANGLES, planeObjects[j+k].iB->GetCount(), GL_UNSIGNED_INT, nullptr);
-		//		glPopMatrix();
-
-		//		planeObjects[j + k].vA->Unbind(); //Unbind vertex buffer
-		//		planeObjects[j + k].iB->Unbind(); //Unbind index buffer
-		//	}
-		//}
+		//Pass time passed to shader
+		basicShader->SetUniform1f("uVTime", timePassed);
+		basicShader->SetUniform1f("uFTime", timePassed);
 	}
+
+	float height = -0.5f;
+	int altitude = 0;
+	float altitudeCheck = 0.0f;
+	int textureID = 0;
 
 	for (int i = 0; i < numOfPlanes; i++)
 	{
-		//Pass time passed to shader
-		basicShader->SetUniform1f("uTime", timePassed);
-
-		//Texture Stuff
+		if (passTime == true)
 		{
-			//Texture Update
-			if (i % 2 == 0.)
-			{
-				textureID = 0;
-				texture->Bind(0);
-			}
-			else
-			{
-				textureID = 1;
-				texture->Bind(1);
-			}
-
-			//basicShader->SetUniform1i("uTexture" + std::to_string(textureCount), textureCount);
-			basicShader->SetUniform1i("textureID", textureID);
-
-			if ((i % (numOfPlanes / nucleation.size())) == 0.0)
-			{
-				altitudeCheck = nucleationRange[nucleation.size() - (i / (numOfPlanes / nucleation.size()))];
-
-				if (basicShader->isBound == true)
-				{
-					basicShader->SetUniform1f("curNucVal", altitudeCheck);
-					basicShader->SetUniform1f("nextNucVal", nucleationRange[(nucleation.size() - (i / (numOfPlanes / nucleation.size()))) + 1]);
-				}
-			}
+			//Pass time passed to shader
+			basicShader->SetUniform1f("uVTime", timePassed);
+			basicShader->SetUniform1f("uFTime", timePassed);
 		}
 
+		///// Texture /////
+		//Texture Update
+		if (i % 1 == 0.)
+		{
+			textureID = 0;
+			texture->Bind(textureID);
+		}
+		if (i % 2 == 0.)
+		{
+			textureID = 1;
+			texture->Bind(textureID);
+		}
+		if (i % 3 == 0.)
+		{
+			textureID = 2;
+			texture->Bind(textureID);
+		}
+		if (i % 4 == 0.)
+		{
+			textureID = 3;
+			texture->Bind(textureID);
+		}
+		if (i % 5 == 0.)
+		{
+			textureID = 4;
+			texture->Bind(textureID);
+		}
+
+		basicShader->SetUniform1i("textureID", textureID);
+		
+		///// Altitude /////
+		if ((i % (numOfPlanes / nucleation.size())) == 0.0)
+		{
+			altitude++;
+			basicShader->SetUniform1f("uAltitude", altitude);
+
+			altitudeCheck = nucleationRange[nucleation.size() - (i / (numOfPlanes / nucleation.size()))];
+			basicShader->SetUniform1f("curNucVal", altitudeCheck);
+			basicShader->SetUniform1f("nextNucVal", nucleationRange[(nucleation.size() - (i / (numOfPlanes / nucleation.size()))) + 1]);
+		}
+		
 		//Object Stuff
 		{
-			height += 0.005f; //randNum(0.0f, 0.0005f);
+			height += heightDifference; //randNum(0.0f, 0.0005f);
 
 			//glm::mat4 modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
 			//glm::mat4 modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, height));
-			//glm::mat4 modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(i - 4.5, 0.0, 0.0f));
+			//glm::mat4 modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(i - 4.5, 0., 0.));
 
 			glm::mat4 modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(randPosX[i], randPosY[i], height));
-
 			glm::mat4 planeRotateMat = glm::rotate(modelMatrix, (0.0f * glm::pi<float>() / 180.0f), glm::vec3(1.0f, 0.0f, 0.0f));
 
 			modelMatrix *= planeRotateMat;
@@ -269,77 +462,6 @@ void Scene::Draw(float timePassed)
 
 		texture->Unbind();
 	}
-}
-
-VertexArrayObject Scene::InitSphere(double r, int lats, int longs)
-{
-	VertexArrayObject object;
-
-	int i, j;
-
-	std::vector<float> vertices;
-	std::vector<unsigned int> indices;
-
-	int indicator = 0;
-
-	for (i = 0; i <= lats; i++)
-	{
-		double lat0 = 3.14159 * (-0.5 + (double)(i - 1) / lats);
-		double z0 = sin(lat0);
-		double zr0 = cos(lat0);
-
-		double lat1 = 3.14159 * (-0.5 + (double)i / lats);
-		double z1 = sin(lat1);
-		double zr1 = cos(lat1);
-
-		for (j = 0; j <= longs; j++)
-		{
-			double lng = 2 * 3.14159 * (double)(j - 1) / longs;
-			double x = cos(lng);
-			double y = sin(lng);
-
-			glNormal3f(x * zr0, y * zr0, z0);
-			glVertex3f(r * x * zr0, r * y * zr0, r * z0);
-			glNormal3f(x * zr1, y * zr1, z1);
-			glVertex3f(r * x * zr1, r * y * zr1, r * z1);
-
-			vertices.push_back(x * zr0);
-			vertices.push_back(y * zr0);
-			vertices.push_back(z0);
-
-			vertices.push_back(0.0f);
-			vertices.push_back(0.0f);
-
-			indices.push_back(indicator);
-			indicator++;
-
-			vertices.push_back(x * zr1);
-			vertices.push_back(y * zr1);
-			vertices.push_back(z1);
-
-			vertices.push_back(1.0f);
-			vertices.push_back(1.0f);
-
-			indices.push_back(indicator);
-			indicator++;
-		}
-
-		indices.push_back(GL_PRIMITIVE_RESTART_FIXED_INDEX);
-	}
-
-	//create vertex buffers and vertex coords
-	object.vA = new VertexArray();
-	object.vB = new VertexBuffer(vertices.data(), vertices.size() * sizeof(float));
-
-	//pointer to layout 0
-	object.vAB.Push<float>(3);	//vertices
-	object.vAB.Push<float>(2);	//tex Coords
-
-	object.vA->AddBuffer(*object.vB, object.vAB);
-
-	object.iB = new IndexBuffer(indices.data(), indices.size());
-
-	return object;
 }
 
 //plane initialisation
@@ -448,11 +570,19 @@ void Scene::RenderTextOutput()
 
 	sprintf_s(cameraPosText, "Cam Position: %.2f, %.2f, %.2f", camera->GetCameraPos().x, camera->GetCameraPos().y, camera->GetCameraPos().z);
 
+	sprintf_s(cloudBoundaries, "Cloud Boundaries: X: %.2f and Y: %.2f", boundaryX, boundaryY);
+
+	sprintf_s(passTimeText, "Passing Time per object draw: %.1i", (int)passTime);
+
 	DisplayText(-1.f, 0.96f, 1.f, 0.f, 0.f, mouseText);
 
 	DisplayText(-1.f, 0.90f, 1.f, 0.f, 0.f, fps);
 
 	DisplayText(-1.f, 0.84f, 1.f, 0.f, 0.f, cameraPosText);
+
+	DisplayText(-1.f, 0.78f, 1.f, 0.f, 0.f, cloudBoundaries);
+
+	DisplayText(-1.f, 0.72f, 1.f, 0.f, 0.f, passTimeText);
 }
 
 // Renders text to screen. Must be called last in render function (before swap buffers)

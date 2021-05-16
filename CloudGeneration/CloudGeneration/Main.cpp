@@ -6,6 +6,7 @@
 #include "Scene.h"
 
 Scene* scene;
+Input* input;
 
 int oldTimeSinceStart = 0;
 
@@ -19,15 +20,37 @@ void Init()
         std::cout << "Error! w/ GLEW." << std::endl;
     }
 
+    input = new Input();
+
     //initialise scene
     scene = new Scene();
-    scene->Init();
+    scene->Init(input);
 }
 
 // scene object to refresh the OpenGL buffers to the new dimensions.
 void ChangeSize(int w, int h)
 {
     scene->Resize(w, h);
+}
+
+//Handles keyboard input events from GLUT.
+// Called whenever a "normal" key is released.
+void processNormalKeys(unsigned char key, int x, int y)
+{
+    // If the ESCAPE key was pressed, exit application.
+    if (key == VK_ESCAPE)
+    {
+        exit(0);
+    }
+
+    // Send key down to input class.
+    input->SetKeyDown(key);
+}
+
+void processNormalKeysUp(unsigned char key, int x, int y)
+{
+    // Send key up to input class.
+    input->SetKeyUp(key);
 }
 
 // Calculates delta time (the time between frames, in seconds)
@@ -66,6 +89,9 @@ int main(int argc, char** argv)
     // Register callback functions for change in size and rendering.
     glutDisplayFunc(RenderScene);
     glutReshapeFunc(ChangeSize);
+
+    glutKeyboardFunc(processNormalKeys);
+    glutKeyboardUpFunc(processNormalKeysUp);
 
     glutIdleFunc(RenderScene);
 

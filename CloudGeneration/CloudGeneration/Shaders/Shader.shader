@@ -6,26 +6,25 @@ layout(location = 1) in vec2 texCoord;
 
 out vec2 vTexCoord;
 out vec3 vPosition;
-out float vTime;
+out vec2 vSt;
 
-uniform float uTime;
+uniform float uVTime;
 uniform mat4 projectionMatrix;
 uniform mat4 viewMatrix;
 uniform mat4 modelMatrix;	//model, view, projection - so everything is positioned in 3d space correctly
 
-float BobbingMotion()
-{
-    float pos = sin(uTime * 0.001) * 0.1;
-
-    return pos;
-}
+uniform vec2 uResolution;
 
 void main()
 {
-    gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position.xy + sin(uTime * 0.0001) * 0.5, position.z, 1.0f);	//(x, y, z, w) w divides other vector components
+    //gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position.xy, position.z, 1.0f);	//(x, y, z, w) w divides other vector components
+    gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position.xy + sin(uVTime * 0.0001) * 0.5, position.z, 1.0f);	//(x, y, z, w) w divides other vector components
+
     vTexCoord = texCoord;
     vPosition = position;
-    vTime = uTime;
+
+    //components of texture coordinates (st) instead of UV for opengl
+    vSt = position.xy / uResolution.xy;
 };
 
 #shader fragment
@@ -35,18 +34,23 @@ layout(location = 0) out vec4 colour;
 
 in vec2 vTexCoord;
 in vec3 vPosition;
-in float vTime;
+in vec2 vSt;
 
 uniform vec4 uColour;
-uniform sampler2D uTexture[2];
+uniform int uBackground;
+uniform sampler2D uTexture[5];
 
 uniform float curNucVal;
 uniform float nextNucVal;
 uniform float randNumber0to1[10];
+uniform float uFTime;
+
+uniform float uTemp;
+uniform float uDens;
+uniform float uPress;
+uniform float uAltitude;
 
 uniform int textureID;
-
-uniform vec2 uResolution;
 
 // Permutation polynomial: (34x^2 + x) mod 289
 vec4 permute(vec4 x)
@@ -196,32 +200,26 @@ float noise(vec2 _st)
     return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) +  (d - b) * u.x * u.y;
 }
 
-
-float fbm(vec2 _st, bool choice) 
+float fbm(vec2 _st, int octaves, float texShift, bool choice)
 {
     float v = 0.0;
     float a = 0.5;
 
-    vec2 shift;
+    // Rotate to reduce axial bias
+    vec2 shift = vec2(texShift);
 
     mat2 rot;
-    int NUM_OCTAVES;
-    // Rotate to reduce axial bias
 
     if (choice)
     {
-        NUM_OCTAVES = 6;
-        shift = vec2(100.0);
         rot = mat2(cos(0.5), sin(0.5), -sin(0.5), cos(0.50));
     }
     else
     {
-        NUM_OCTAVES = 2;
-        shift = vec2(300.0);
         rot = mat2(sin(0.9), cos(0.9), -cos(0.9), sin(0.90));
     }
 
-    for (int i = 0; i < NUM_OCTAVES; ++i) 
+    for (int i = 0; i < octaves; ++i) 
     {
         v += a * noise(_st);
         _st = rot * _st * 2.0 + shift;
@@ -231,141 +229,298 @@ float fbm(vec2 _st, bool choice)
     return v;
 }
 
+float MixValue(vec2 st, int x, int y)
+{
+    float mixValue = distance(st, vec2(vTexCoord.x * randNumber0to1[x], vTexCoord.y * randNumber0to1[y]));
+    //float mixValue = distance(st, vec2(vTexCoord.x, vTexCoord.y));
 
-//void Texture1()
+    return mixValue;
+}
+
+//void CalcAtmosphere()
 //{
-//    //set texture and texture coordinates
-//    texColour = texture(uTexture[0], vTexCoord); //find texCoord pixel to sample
-//       //texColour *= vec4(0.3, 0.5, 0.3, 1.0);
-//    st = vPosition.xy / uResolution.xy;
+//    int altitude[25]; //array of values for the altitude, from 0 to 25km
 //
+//    for (int i = 0; i < 25; i++)
+//    {
+//        altitude[i] = i * 1000;
 //
+//        //compute temperature of atmosphere
+//        float common = 1.0f - (((gamma - 1.0f) / gamma) * (altitude[i] / scaleHeight));
+//        float temp0 = temperature * common;
 //
+//        //(1 - ((gamma - 1) / gamma) * (altitude[i] / scaleHeight));
+//
+//        //compute density and pressure
+//        float press0 = pressure * glm::pow(common, (gamma / (gamma - 1.0f)));
+//        float dens0 = density * glm::pow(common, (1.0f / (gamma - 1.0f)));
+//
+//        //set results
+//        dens.push_back(dens0);
+//        temp.push_back(temp0);
+//        press.push_back(press0);
+//    }
+//
+//    CalcWaterPressure();
 //}
 
+float CalcSatPressure(float t)
+{
+    t -= 273;	//convert to Celsius
+
+    return 610.78f * exp((17.27 * t) / (237.3 + t));
+}
+
+#define PI 3.1415926535897932384626433832795
+
+float CalcNucleation(float t, float waterPress)
+{
+    float sigma = 72.75e-3;
+    float dalton = 1.66053906660e-27;
+    float m1 = 18.02 * dalton;                  //m1 = 2.99e-23f * 1e-3f  Converted into SI
+    float v1 = 2.99e-23 * 1e-6;                 // converted into SI
+    float kb = 1.38e-23;
+
+    float N = waterPress / (kb * t);
+    float S = waterPress / CalcSatPressure(t);
+
+    float inside = -(16.0f * PI / 3.0f)
+        * (pow(v1, 2.0) * pow(sigma, 3.0))
+        / (pow(kb * t, 3.0) * pow(log(S), 2.0));
+
+    float j = sqrt(2.0 * sigma / (PI * m1)) * (v1 * pow(N, 2.0) / S) * exp(inside);
+
+    return j;
+}
+
+void CalcWaterPressure(float superSat, inout float nucleation)
+{
+    float pressH20;
+
+    //colder depending on higher the altitude so number drops as the altitude increases
+
+    float temp = 293.f / uAltitude;     ///could change dependiong on height value from scene
+
+    pressH20 = (superSat * uAltitude) * CalcSatPressure(temp);
+
+    nucleation = CalcNucleation(temp, pressH20);
+}
+
+vec4 fbmNoiseTex(vec2 st, vec2 qTexCoordsX, vec2 qTexCoordsY, vec2 rTexCoordsX, vec2 rTexCoordsY, float offset, int octaves, float shift, inout float nucleation)
+{
+    vec2 q = vec2(0.);
+    vec2 r = vec2(0.);
+
+    q.x = fbm(st + qTexCoordsX * uFTime * 0.003, octaves, shift, true);
+    q.y = fbm(st + qTexCoordsY, octaves, shift, true);
+
+    r.x = fbm(st + 1.0 * q + rTexCoordsX + offset + 0.15 * uFTime * 0.003, octaves, shift, false);
+    r.y = fbm(st + 1.0 * q + rTexCoordsY + offset * uFTime * 0.003, octaves, shift, true);
+
+    float f = fbm(st + r, octaves, shift, true);
+
+    vec4 fBmNoiseTex = vec4((f * f * f + .6 * f * f + .5) * colour.xyz, 0.7);
+
+    //CalcWaterPressure(f, nucleation);
+
+    //float nucleationDelta = (5.2899401006521426e+28 - 3.39642e-48);
+
+    //float nucleationRange = nucleation / nucleationDelta;
+
+    //fBmNoiseTex.a *= nucleationRange;
+
+    return fBmNoiseTex;
+}
+
+void Setupfbm(vec2 st, float scale, vec2 qTexCoordsX, vec2 qTexCoordsY, vec2 rTexCoordsX, vec2 rTexCoordsY, float offset, int octaves, float shift, int mixValueX, int mixValueY, inout float nucleation)
+{
+    vec2 fbmSt = vec2(st * scale);
+
+    colour *= fbmNoiseTex(fbmSt, qTexCoordsX, qTexCoordsX, rTexCoordsX, rTexCoordsY, offset, octaves, shift, nucleation);
+
+    float mixValue = MixValue(fbmSt, mixValueX, mixValueY);
+
+    colour = mix(colour, uColour, mixValue);   //background mix
+}
+
+void SetupWorley(vec2 st, float scale, inout float nucleation)
+{
+    vec2 wSt = st * scale;
+
+    vec2 F = worley(wSt, 0.8f);
+
+    //Closest and second closest
+    float F1 = F.x;
+    float F2 = F.y;
+
+    float n = 1.0 - 1.5 * F1;
+
+    vec4 worleyNoiseTex = vec4(n * n * n * colour.xyz, 0.8);
+
+    CalcWaterPressure(n * n, nucleation);
+
+    float nucleationDelta = (5.2899401006521426e+28 - 3.39642e-48);
+
+    float nucleationRange = nucleation / nucleationDelta;
+
+    worleyNoiseTex.a *= nucleationRange;
+
+    colour = mix(colour, worleyNoiseTex, 0.4);
+
+    //colour *= worleyNoiseTex;
+}
+
+void Texture1(inout float nucleation)
+{
+    vec4 texColour = texture(uTexture[0], vTexCoord);
+    colour = texColour;
+
+    Setupfbm(vSt, 210., vec2(0.0), vec2(1.0), vec2(1.7, 9.2), vec2(8.3, 2.8), 0.126, 6, 100.0, 3, 9, nucleation);
+
+    SetupWorley(vSt, 210., nucleation);
+}
+void Texture2(inout float nucleation)
+{
+    vec4 texColour = texture(uTexture[1], vTexCoord);
+    colour = texColour;
+
+    Setupfbm(vSt, 350., vec2(-0.150, 0.430), vec2(1.0), vec2(-0.340, 0.420), vec2(-0.400, -0.500), 0.0126, 7, 200.0, 4, 1, nucleation);
+
+    SetupWorley(vSt, 250., nucleation);
+}
+void Texture3(inout float nucleation)
+{
+    vec4 texColour = texture(uTexture[2], vTexCoord);
+    colour = texColour;
+
+    Setupfbm(vSt, 310., vec2(0.), vec2(-0.750, 0.750), vec2(0.680, -0.910), vec2(0.670, 0.380), 0.326, 8, 150.0, 9, 0, nucleation);
+
+    SetupWorley(vSt, 180., nucleation);
+}
+void Texture4(inout float nucleation)
+{
+    vec4 texColour = texture(uTexture[3], vTexCoord);
+    colour = texColour;
+  
+    Setupfbm(vSt, 270., vec2(0.), vec2(1.), vec2(-0.960, 0.660), vec2(0.2), 0.05, 7, 300.0, 9, 8, nucleation);
+
+    //SetupWorley(vSt, 100., nucleation);
+}
+void Texture5(inout float nucleation)
+{
+    vec4 texColour = texture(uTexture[4], vTexCoord);
+    colour = texColour;
+
+    Setupfbm(vSt, 240., vec2(1.), vec2(-0.470, -0.530), vec2(0.), vec2(0.520, -0.590), 0.2, 4, 180.0, 2, 2, nucleation);
+
+    SetupWorley(vSt, 100., nucleation);
+}
 
 void main()
 {
-    vec4 texColour;
-    vec4 worleyTex;
-    vec4 fBmTex;
-    vec4 perlinTex;
-
-    //components of texture coordinates (st) instead of UV for opengl
-    vec2 st = vPosition.xy / uResolution.xy * 2.;
+    float nucleation = 0;
 
     if (textureID == 0)
     {
-        texColour = texture(uTexture[0], vTexCoord); //find texCoord pixel to sample
-        //texColour *= vec4(0.3, 0.5, 0.3, 1.0);
-        st = vPosition.xy / uResolution.xy;
+        Texture1(nucleation);
     }
-    else if(textureID == 1)
+    else if (textureID == 1)
     {
-        texColour = texture(uTexture[1], vTexCoord); //find texCoord pixel to sample
-        //texColour *= vec4(0.8, 0.2, 0.5, 1.0);
-        st = vPosition.xy / uResolution.xy;
+        Texture2(nucleation);
     }
-
-    colour = texColour;
-
-    //////Perlin
+    else if (textureID == 2)
     {
-    //    vec4 perlinTex = colour;
-
-    //    for (int i = 0; i < 1; i++)
-    //    {
-    //        vec2 pScale = vPosition.xy / uResolution.xy;
-    //        pScale *= 0.01f;
-
-    //        perlinTex *= SimplexNoise(pScale, vPosition.xy);
-    //    }
-
-    //    colour *= perlinTex;
+        Texture3(nucleation);
     }
-
-    ////Worley
+    else if (textureID == 3)
     {
-        //vec2 wScale = vPosition.xy / uResolution.xy;
-        //wScale *= 100.0f;
-
-        ////wScale *= wScale * abs(sin(uTime * 0.1f) * 3.0f);
-
-        //vec2 F = worley(wScale + vec2(vPosition), 0.8f);
-
-        //vec2 wScale = vPosition.xy / uResolution.xy;
-
-        //wScale *= 10;
-
-        //vec2 F = worley(wScale + vec2(uTime * 0.0001), 0.8f);
-
-        ////Closest and second closest
-        //float F1 = F.x;
-        //float F2 = F.y;
-
-        //float n = 1.0 - 1.5 * F1;
-
-        //vec4 worleyNoiseTex = vec4(n, n, n, 1.0);
-
-        //colour *= worleyNoiseTex;
+        Texture4(nucleation);
     }
-
-    //fBm
+    else if (textureID == 4)
     {
-        //vec2 st = gl_FragCoord.xy / uResolution.xy * 2.;
-
-        //vec2 st = vPosition.xy / uResolution.xy * 2.;
-
-        st *= 210.0;
-
-        vec2 q = vec2(0.);
-        vec2 r = vec2(0.);
-
-        if (textureID == 0)
-        {
-            q.x = fbm(st + 0.00 * vTime * 0.0003, true);
-            q.y = fbm(st + vec2(1.0), true);
-
-            r.x = fbm(st + 1.0 * q + vec2(1.7, 9.2) + 0.15 * vTime * 0.0003, false);
-            r.y = fbm(st + 1.0 * q + vec2(8.3, 2.8) + 0.126 * vTime * 0.0003, true);
-        }
-        else
-        {
-            q.x = fbm(st + vec2(vPosition.x + 5.3, vPosition.y + 9.2) + 0.15 * vTime * 0.0001, true);
-            q.y = fbm(st, false);
-
-            r.x = fbm(st + 1.0 * q + vec2(vPosition.x + 8.3, vPosition.y - 2.8) + 0.15 * vTime * 0.0003, false);
-            r.y = fbm(st + 1.0 * q + vec2(vPosition.x - 1.7, vPosition.y + 9.2) + 0.126 * vTime * 0.0003, true);
-        }
-
-        float f = fbm(st + r, true);
-
-        vec4 fBmNoiseTex = vec4((f * f * f + .6 * f * f + .5 * f) * colour.xyz, 1.);
-
-        colour *= fBmNoiseTex;
+        Texture5(nucleation);
     }
 
-    float mixValue;
+    //float nucleationRange = (.666 / log(nucleation));
+    //float nucleationRange = (5.2899401006521426e+28 / nucleation);
 
-    if (textureID == 0)
-    {
-        mixValue = distance(st, vec2(vTexCoord.x * randNumber0to1[3], vTexCoord.y * randNumber0to1[9]));
-    }
-    else
-    {
-        mixValue = distance(st, vec2(vTexCoord.x * randNumber0to1[1], vTexCoord.y * randNumber0to1[5]));
-    }
-    
-    colour = mix(colour, vec4(0.0, 0.0, 0.0, 0.2), mixValue);
+    colour.a *= curNucVal;
 
-    //colour.a = mix(curNucVal, nextNucVal, mixValue);
-
-    //if (colour.r < 0.1 && colour.g < 0.1 && colour.b < 0.1)
+    //if (textureID == 0)
     //{
-    //    //discard;
-    //    colour = vec4(0, 0.3, 0.7, 0.05); // fully transparent, won't show a thing
+    //    texColour = texture(uTexture[0], vTexCoord); //find texCoord pixel to sample
+    //}
+    //else if(textureID == 1)
+    //{
+    //    texColour = texture(uTexture[1], vTexCoord); //find texCoord pixel to sample
     //}
 
+    //colour = texColour;
+
+    ////fBm
+    //
+    //vec2 fBmSt = vPosition.xy / uResolution.xy;
+
+    //fBmSt *= 210.0;
+
+    //vec2 q = vec2(0.);
+    //vec2 r = vec2(0.);
+
+    //if (textureID == 0)
+    //{
+    //    q.x = fbm(fBmSt * uFTime * 0.0001, true);
+    //    q.y = fbm(fBmSt + vec2(1.0), true);
+
+    //    r.x = fbm(fBmSt + 1.0 * q + vec2(1.7, 9.2) + 0.15 * uFTime * 0.01, false);
+    //    r.y = fbm(fBmSt + 1.0 * q + vec2(8.3, 2.8) + 0.126 * uFTime * 0.001, true);
+    //}
+    //else
+    //{
+    //    q.x = fbm(fBmSt + vec2(vPosition.x + 5.3, vPosition.y + 9.2) + 0.15 * uFTime * 0.001, true);
+    //    q.y = fbm(fBmSt, false);
+
+    //    r.x = fbm(fBmSt + 1.0 * q + vec2(vPosition.x + 8.3, vPosition.y - 2.8) + 0.15 * uFTime * 0.001, false);
+    //    r.y = fbm(fBmSt + 1.0 * q + vec2(vPosition.x - 1.7, vPosition.y + 9.2) + 0.126 * uFTime * 0.001, true);
+    //}
+
+    //float f = fbm(fBmSt + r, true);
+
+    //vec4 fBmNoiseTex = vec4((f * f * f + .6 * f * f + .5) * colour.xyz, 1.);
+
+    //colour *= fBmNoiseTex;
+
+    //////Worley
+    //{
+    //    //vec2 wScale = vPosition.xy / uResolution.xy;
+    //    //wScale *= 100.0f;
+
+    //    ////wScale *= wScale * abs(sin(uTime * 0.1f) * 3.0f);
+
+    //    //vec2 F = worley(wScale + vec2(vPosition), 0.8f);
+
+    //    vec2 wSt = st;
+
+    //    wSt *= 110;
+
+    //    vec2 F = worley(wSt, 0.8f);
+
+    //    //Closest and second closest
+    //    float F1 = F.x;
+    //    float F2 = F.y;
+
+    //    float n = 1.0 - 1.5 * F1;
+
+    //    vec4 worleyNoiseTex = vec4(n * n * n * colour.xyz, 0.01);
+
+    //    //colour = mix(colour, worleyNoiseTex, 0.3);
+
+    //    //colour *= worleyNoiseTex;
+    //}
+   
+    //colour = mix(colour, vec4(0.0, 0.0, 0.0, 0.2), mixValue); //black background for stormy clouds
+    //colour = mix(colour, vec4(0.0, 0.3, 0.8, mix(curNucVal, nextNucVal, mixValue * .8)), mixValue);
+
+    //colour.a = mix(curNucVal, nextNucVal, mixValue);
 
     //fBm
     /*vec2 q = vec2(0.);
