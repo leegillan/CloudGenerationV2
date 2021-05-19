@@ -23,11 +23,7 @@ Scene::Scene()
 	//Blending
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	//glBlendFunc(GL_SRC_COLOR, GL_ONE_MINUS_SRC_COLOR);
 	glBlendEquation(GL_COMBINE);
-
-	/*glEnable(GL_ALPHA_TEST);
-	glAlphaFunc(GL_GREATER, 0.1f);*/
 }
 
 void Scene::Init(Input* in)
@@ -40,11 +36,15 @@ void Scene::Init(Input* in)
 	//put y to 1 to make it look like its above camera
 	camera->SetCameraPos(glm::vec3(0.0f, 2.0f, 4.f));
 
+	//cloud spawn boundary
 	boundaryX = 1;
 	boundaryY = 1;
 
+	//initial number of planes
+	numOfPlanes = 1000;
+
 	//setup planes
-	for (int i = 0; i < numOfPlanes; i++)
+	for (int i = 0; i < maxNumberofPlanes; i++)
 	{
 		VertexArrayObject object = InitPlane();
 		planeObjects.push_back(object);
@@ -62,6 +62,7 @@ void Scene::Init(Input* in)
 	basicShader = new Shader("Shaders/Shader.shader");
 	basicShader->Bind();
 
+	//setup textures
 	texture = new Texture();
 	texture->GenerateTexture2D(128, 128);
 
@@ -84,9 +85,29 @@ void Scene::Init(Input* in)
 	//texture setup for passing through shader
 	for (int i = 0; i < 10; i++)
 	{
-		randNumber[i] = randNum(0.f, 1.f);
+		randNumber[i] = randNum(-1.f, 1.f);
 		basicShader->SetUniform1f("randNumber0to1[" + std::to_string(i) + "]", randNumber[i]);
 	}
+
+	//Nucleation variable passes to shader
+	float sigma = 72.75e-3;
+	float dalton = 1.66053906660e-27;
+	float m1 = 18.02 * dalton;                  //m1 = 2.99e-23f * 1e-3f  Converted into SI
+	float v1 = 2.99e-23 * 1e-6;                 // converted into SI
+	float kb = 1.38e-23;
+
+	basicShader->SetUniform1f("uSigma", sigma);
+	basicShader->SetUniform1f("uM1", m1);
+	basicShader->SetUniform1f("uV1", v1);
+	basicShader->SetUniform1f("uKB", kb);
+	basicShader->SetUniform1f("uTemp", temp);
+	basicShader->SetUniform1f("curNucVal", 0.01);
+
+	usingNuc = 0;
+	basicShader->SetUniform1i("uUsingNuc", usingNuc);
+
+	drawInLine = 0;
+	basicShader->SetUniform1i("uRenderOption", drawInLine);
 
 	basicShader->Unbind();
 
@@ -97,8 +118,15 @@ void Scene::Init(Input* in)
 	//Nucleation results tests
 	nucleation = nuc->GetNucleation();
 
-	std::cout << "This is the end. Onto normal nuc values" << std::endl;
+	//setup nucleation values to send to shader
+	nuc->CalcShaderValues();
+	for (int i = 0; i < 100; i++)
+	{
+		shaderNucleation[i] = nuc->GetShaderValues().at(i);
+		basicShader->SetUniform1i("nucleationValues[" + std::to_string(i) + "]", shaderNucleation[i]);
+	}
 
+	std::cout << "This is the end. Onto normal nuc values" << std::endl;
 	for (int i = 0; i < 25; i++)
 	{
 		std::cout << nucleation[i] << std::endl;
@@ -113,37 +141,13 @@ void Scene::Init(Input* in)
 	for (int j = 0; j < 24; j++)
 	{
 		nucleationRange[j] = (nucleation[j + 1] / deltaN);
-
 		std::cout << nucleationRange[j] << std::endl;
-	}
-
-	//you end up with values ranging from 0 to 1 but with large bias towards 0^28
-
-	std::cout << "This is the end. Onto normal log nuc values" << std::endl;
-
-	for (int i = 0; i < 25; i++)
-	{
-		std::cout << std::log(nucleation[i]) / 100 << std::endl;
-	}
-
-	std::cout << "This is the end. Onto log range" << std::endl;
-
-	float logDeltaN = log(nucleation[24]) - log(nucleation[2]);
-
-	std::cout << logDeltaN << std::endl;
-
-	float logNucleationRange[25];
-
-	for (int j = 0; j < 24; j++)
-	{
-		logNucleationRange[j] = (log(nucleation[j + 1]) / logDeltaN);
-
-		std::cout << log(logNucleationRange[j]) << std::endl;
 	}
 
 	heightDifference = 0.001f;
 
 	passTime = true;
+
 }
 
 //update scene
@@ -162,29 +166,7 @@ void Scene::Update(float dt, float timePassed)
 
 void Scene::HandleInput()
 {
-	//Camera positions and look
-
-	//looking up at clouds from below
-	if (input->isKeyDown('1'))
-	{
-		camera->SetCameraPos(glm::vec3(0.0f, 0.0f, 5.f));
-		camera->SetCameraLook(glm::vec3(0.0, 0.0, 0.0));
-	}
-
-	//looking up at clouds from below further back
-	if (input->isKeyDown('2'))
-	{
-		camera->SetCameraPos(glm::vec3(0.0f, 0.0f, 8.f));
-		camera->SetCameraLook(glm::vec3(0.0, 0.0, 0.0));
-	}
-
-	//looking up at clouds from below at an angle
-	if (input->isKeyDown('3'))
-	{
-		camera->SetCameraPos(glm::vec3(0.0f, 0.0f, 4.f));
-		camera->SetCameraLook(glm::vec3(0.0, -0.5, 0.0));
-	}
-
+	//Controls for program --In README
 	if (input->isKeyDown('q'))
 	{
 		camera->SetCameraLook(glm::vec3(camera->GetCameraLook().x , camera->GetCameraLook().y, camera->GetCameraLook().z + 0.1));
@@ -218,38 +200,11 @@ void Scene::HandleInput()
 	if (input->isKeyDown(';'))
 	{
 		camera->SetCameraPos(glm::vec3(camera->GetCameraPos().x , camera->GetCameraPos().y + 0.1, camera->GetCameraPos().z));
-		camera->SetCameraLook(glm::vec3(camera->GetForward().x, camera->GetForward().y, camera->GetForward().z));
 	}
 
 	if (input->isKeyDown('p'))
 	{
 		camera->SetCameraPos(glm::vec3(camera->GetCameraPos().x, camera->GetCameraPos().y - 0.1, camera->GetCameraPos().z));
-
-		camera->SetCameraLook(glm::vec3(camera->GetForward().x, camera->GetForward().y, camera->GetForward().z));
-	}
-
-	if (input->isKeyDown('4'))
-	{
-		camera->SetCameraPos(glm::vec3(0.0f, 5.0f, 0.f));
-		camera->SetCameraLook(glm::vec3(camera->GetForward().x, camera->GetForward().y, camera->GetForward().z));
-	}
-
-	if (input->isKeyDown('5'))
-	{
-		camera->SetCameraPos(glm::vec3(0.0f, 5.0f, 3.f));
-		camera->SetCameraLook(glm::vec3(camera->GetForward().x, camera->GetForward().y, camera->GetForward().z));
-	}
-
-	if (input->isKeyDown('6'))
-	{
-		camera->SetCameraPos(glm::vec3(0.0f, 4.0f, 2.f));
-		camera->SetCameraLook(glm::vec3(camera->GetForward().x, camera->GetForward().y, camera->GetForward().z));
-	}
-
-	if (input->isKeyDown('7'))
-	{
-		camera->SetCameraPos(glm::vec3(0.0f, 3.0f, 3.f));
-		camera->SetCameraLook(glm::vec3(camera->GetForward().x, camera->GetForward().y, camera->GetForward().z));
 	}
 
 	if (input->isKeyDown('b'))
@@ -273,6 +228,13 @@ void Scene::HandleInput()
 	if(input->isKeyDown('r'))
 	{
 		RandomiseCloudLocations();	
+
+		basicShader->Bind();
+		for (int i = 0; i < 10; i++)
+		{
+			randNumber[i] = randNum(-1.f, 1.f);
+			basicShader->SetUniform1f("randNumber0to1[" + std::to_string(i) + "]", randNumber[i]);
+		}
 	}
 	
 	ChangeCloudBoundaries();
@@ -293,8 +255,55 @@ void Scene::HandleInput()
 		input->SetKeyUp('t');
 	}
 
+	if (input->isKeyDown(','))
+	{
+		if (numOfPlanes < maxNumberofPlanes)
+		{
+			numOfPlanes += 10;
+			RandomiseCloudLocations();
+		}
+	}
+
+	if (input->isKeyDown('.'))
+	{
+		if (numOfPlanes > 100)
+		{
+			numOfPlanes -= 10;
+			RandomiseCloudLocations();
+		}
+	}
+
+	if (input->isKeyDown('c'))
+	{
+		if (usingNuc == 0)
+		{
+			usingNuc = 1;
+		}
+		else
+		{
+			usingNuc = 0;
+		}
+
+		input->SetKeyUp('c');
+	}
+
+	if (input->isKeyDown('v'))
+	{
+		if (drawInLine == 0)
+		{
+			drawInLine = 1;
+		}
+		else
+		{
+			drawInLine = 0;
+		}
+
+		input->SetKeyUp('v');
+	}
+
 }
 
+//randomises cloud objects locations
 void Scene::RandomiseCloudLocations()
 {
 	for (int i = 0; i < numOfPlanes; i++)
@@ -304,29 +313,30 @@ void Scene::RandomiseCloudLocations()
 	}
 }
 
+//updates cloud boundaries
 void Scene::ChangeCloudBoundaries()
 {
 	if (input->isKeyDown('i'))
 	{
-		boundaryX += 0.01f;
+		boundaryX += 0.1f;
 		RandomiseCloudLocations();
 	}
 
-	if (input->isKeyDown('o') && boundaryX >= 0.01f)
+	if (input->isKeyDown('o') && boundaryX >= 0.1f)
 	{
-		boundaryX -= 0.01f;
+		boundaryX -= 0.1f;
 		RandomiseCloudLocations();
 	}
 
 	if (input->isKeyDown('-'))
 	{
-		boundaryY += 0.01f;
+		boundaryY += 0.1f;
 		RandomiseCloudLocations();
 	}
 
-	if (input->isKeyDown('=') && boundaryY >= 0.01f)
+	if (input->isKeyDown('=') && boundaryY >= 0.1f)
 	{
-		boundaryY -= 0.01f;
+		boundaryY -= 0.1f;
 		RandomiseCloudLocations();
 	}
 }
@@ -340,9 +350,6 @@ void Scene::Render(float dt, float timePassed)
 	// Reset transformations
 	glLoadIdentity();
 
-	//camera->SetCameraLook(glm::vec3(camera->GetForward().x, camera->GetForward().y, camera->GetForward().z));
-	//camera->SetCameraLook(glm::vec3(camera->GetForward().x, -4.0, camera->GetForward().z));
-
 	camera->SetCameraLook(camera->GetCameraLook());
 
 	//set the new view matrix for updating
@@ -350,10 +357,12 @@ void Scene::Render(float dt, float timePassed)
 
 	//glPolygonMode(GL_FRONT, GL_LINE);
 
+	//bind shader
 	basicShader->Bind(); //Bind shader
 
 	Draw(timePassed);
-
+	
+	//unbind shader
 	basicShader->Unbind();
 
 	// Render text, should be last object rendered.
@@ -365,12 +374,14 @@ void Scene::Render(float dt, float timePassed)
 
 void Scene::Draw(float timePassed)
 {
+	//passes variables to shader
 	basicShader->SetUniformMat4("viewMatrix", camera->GetViewMatrix());
 	basicShader->SetUniformMat4("projectionMatrix", camera->GetProjectionMatrix());
 
-	basicShader->SetUniform1f("curNucVal", 0.01);
-	basicShader->SetUniform1f("nextNucVal", 0.01);
 	basicShader->SetUniform4f("uColour", backgroundColour);
+
+	basicShader->SetUniform1i("uRenderOption", drawInLine);
+	basicShader->SetUniform1i("uUsingNuc", usingNuc);
 
 	if (passTime == false)
 	{
@@ -381,9 +392,10 @@ void Scene::Draw(float timePassed)
 
 	float height = -0.5f;
 	int altitude = 0;
-	float altitudeCheck = 0.0f;
+	float nucVal = 0.0f;
 	int textureID = 0;
 
+	//loops through all objects
 	for (int i = 0; i < numOfPlanes; i++)
 	{
 		if (passTime == true)
@@ -394,7 +406,7 @@ void Scene::Draw(float timePassed)
 		}
 
 		///// Texture /////
-		//Texture Update
+		//Choose Texture to Update
 		if (i % 1 == 0.)
 		{
 			textureID = 0;
@@ -421,34 +433,47 @@ void Scene::Draw(float timePassed)
 			texture->Bind(textureID);
 		}
 
+		//send texture to shader
 		basicShader->SetUniform1i("textureID", textureID);
 		
 		///// Altitude /////
+		//Determine which altitude space the clouds are in and then send nucleation value
 		if ((i % (numOfPlanes / nucleation.size())) == 0.0)
 		{
 			altitude++;
 			basicShader->SetUniform1f("uAltitude", altitude);
 
-			altitudeCheck = nucleationRange[nucleation.size() - (i / (numOfPlanes / nucleation.size()))];
-			basicShader->SetUniform1f("curNucVal", altitudeCheck);
-			basicShader->SetUniform1f("nextNucVal", nucleationRange[(nucleation.size() - (i / (numOfPlanes / nucleation.size()))) + 1]);
+			nucVal = nucleationRange[nucleation.size() - (i / (numOfPlanes / nucleation.size()))];
+			basicShader->SetUniform1f("curNucVal", nucVal);
 		}
 		
-		//Object Stuff
+		//Objects
 		{
+			//add to heigt difference between objects
 			height += heightDifference; //randNum(0.0f, 0.0005f);
 
-			//glm::mat4 modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
-			//glm::mat4 modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, height));
-			//glm::mat4 modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(i - 4.5, 0., 0.));
+			glm::mat4 modelMatrix;
 
-			glm::mat4 modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(randPosX[i], randPosY[i], height));
+			//choose model matrix render option
+			if (drawInLine == 1)
+			{
+				modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(i - 4.5, 0.0f, 0.0f));
+			}
+			else
+			{
+				modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(randPosX[i], randPosY[i], height));
+			}
+
+			//rotation matrix
 			glm::mat4 planeRotateMat = glm::rotate(modelMatrix, (0.0f * glm::pi<float>() / 180.0f), glm::vec3(1.0f, 0.0f, 0.0f));
 
+			//multiply matrix
 			modelMatrix *= planeRotateMat;
 
+			//send model matrix to shader
 			basicShader->SetUniformMat4("modelMatrix", modelMatrix);
 
+			//bind objects to be drawn
 			planeObjects[i].vA->Bind(); //Bind vertex buffer
 			planeObjects[i].iB->Bind(); //Bind index buffer
 
@@ -456,10 +481,12 @@ void Scene::Draw(float timePassed)
 				glDrawElements(GL_TRIANGLES, planeObjects[i].iB->GetCount(), GL_UNSIGNED_INT, nullptr);
 			glPopMatrix();
 
+			//unbind objects
 			planeObjects[i].vA->Unbind(); //Unbind vertex buffer
 			planeObjects[i].iB->Unbind(); //Unbind index buffer
 		}
 
+		//unbind texture
 		texture->Unbind();
 	}
 }
@@ -574,6 +601,10 @@ void Scene::RenderTextOutput()
 
 	sprintf_s(passTimeText, "Passing Time per object draw: %.1i", (int)passTime);
 
+	sprintf_s(planeCountText, "Amount of planes beings used: %.1i", numOfPlanes);
+
+	sprintf_s(usingNucText, "Using Nucleation 0: No 1: Yes -> %.1i", (int)usingNuc);
+
 	DisplayText(-1.f, 0.96f, 1.f, 0.f, 0.f, mouseText);
 
 	DisplayText(-1.f, 0.90f, 1.f, 0.f, 0.f, fps);
@@ -583,6 +614,10 @@ void Scene::RenderTextOutput()
 	DisplayText(-1.f, 0.78f, 1.f, 0.f, 0.f, cloudBoundaries);
 
 	DisplayText(-1.f, 0.72f, 1.f, 0.f, 0.f, passTimeText);
+
+	DisplayText(-1.f, 0.66f, 1.f, 0.f, 0.f, planeCountText);
+
+	DisplayText(-1.f, 0.60f, 1.f, 0.f, 0.f, usingNucText);
 }
 
 // Renders text to screen. Must be called last in render function (before swap buffers)

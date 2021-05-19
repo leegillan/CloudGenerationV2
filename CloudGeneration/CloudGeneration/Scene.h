@@ -74,13 +74,19 @@ protected:
 	Nucleation* nuc;
 
 	std::vector<double> nucleation;
-	float nucleationRange[25];
+	float nucleationRange[100];
+	float shaderNucleation[100];
+
+	//nucleation temp
+	float temp = 293.;
 
 	//group of planes
 	std::vector<VertexArrayObject> planeObjects;
-	const static int numOfPlanes = 1500;
-	double randPosX[numOfPlanes];
-	double randPosY[numOfPlanes];
+	const static int maxNumberofPlanes = 5000;
+	const static int minNumberofPlanes = 100;
+	double randPosX[maxNumberofPlanes];
+	double randPosY[maxNumberofPlanes];
+	int numOfPlanes;
 
 	float randNumber[10];
 	int randTexture;
@@ -104,11 +110,18 @@ protected:
 	char mouseText[40];
 	char cameraPosText[40];
 
+	int usingNuc;
+	int drawInLine;
+
 	bool passTime;
 	char passTimeText[40];
 
+	char usingNucText[40];
+
 	//boundary text
 	char cloudBoundaries[40];
+
+	char planeCountText[40];
 
 	//camera location text
 	char cameraLoc[40];

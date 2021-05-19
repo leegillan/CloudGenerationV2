@@ -65,32 +65,35 @@ void Nucleation::CalcWaterPressure()
 	}
 }
 
+void Nucleation::CalcShaderValues()
+{
+	double pressH20;
+	double temp = 293.f;
+
+	for (int i = 0; i < 100; i++)
+	{
+		pressH20 = ((i / 10) * 10000) * CalcPressureSat(temp);
+
+		shaderNucleation.push_back(CalcNucleation(temp, pressH20));
+	}
+}
+
 double Nucleation::CalcPressureSat(double t)
 {
 	t -= 273;	//convert to Celsius
 
 	return 610.78f * glm::exp((17.27 * t) / (237.3 + t));
 }
-
+//calculates nucleation
 double Nucleation::CalcNucleation(double t, double waterPress)
 {
 	double N = waterPress / (kb * t);
 	double S = waterPress / CalcPressureSat(t);
 
 	double inside = -(16.0f * glm::pi<double>() / 3.0f)
-		* (glm::pow(v1, 2.0) * glm::pow(sigma, 3.0))
-		/ (glm::pow(kb * t, 3.0) * glm::pow(glm::log(S), 2.0));
+		* (glm::pow(v1, 2.0) * glm::pow(sigma, 3.0));
 
 	double j = glm::sqrt(2.0 * sigma / (glm::pi<double>() * m1)) * (v1 * glm::pow(N, 2.0) / S) * glm::exp(inside);
 
 	return j;
 }
-
-//def cluster(t, p_h2o) :
-//	S = p_h2o / p_sat(t)
-//	return (32.0 * np.pi / 3.0) \
-//	* ((v1 * *2.0) * (sigma * *3.0)) / (((kb * t) * *3.0) * (np.log(S) * *3.0))
-//	//
-
-//TODO :: Nucleation at one altitude
-//print results to a csv file for graphing
