@@ -12,8 +12,8 @@ Nucleation::Nucleation()
 	//Nucleation variables
 	sigma = 72.75e-3;
 	dalton = 1.66053906660e-27;
-	m1 = 18.02 * dalton; //m1 = 2.99e-23f * 1e-3f  Converted into SI
-	v1 = 2.99e-23 * 1e-6; // converted into SI
+	m1 = 18.02 * dalton;		//m1 = 2.99e-23f * 1e-3f  Converted into SI
+	v1 = 2.99e-23 * 1e-6;		// converted into SI
 	kb = 1.38e-23;
 }
 
@@ -51,8 +51,6 @@ void Nucleation::CalcWaterPressure()
 
 	double temp = 293.f;
 
-	//std::cout << press[0];
-
 	for (int i = 0; i < 25; i++)
 	{
 		superSat[i] = i;
@@ -60,8 +58,6 @@ void Nucleation::CalcWaterPressure()
 
 		waterPress.push_back(pressH20);
 		nucleation.push_back(CalcNucleation(temp, pressH20));
-
-		//Add console dump
 	}
 }
 
@@ -72,7 +68,7 @@ void Nucleation::CalcShaderValues()
 
 	for (int i = 0; i < 100; i++)
 	{
-		pressH20 = ((i / 10) * 10000) * CalcPressureSat(temp);
+		pressH20 = (((double)i / 100) * 10000) * CalcPressureSat(temp);
 
 		shaderNucleation.push_back(CalcNucleation(temp, pressH20));
 	}
@@ -82,8 +78,11 @@ double Nucleation::CalcPressureSat(double t)
 {
 	t -= 273;	//convert to Celsius
 
-	return 610.78f * glm::exp((17.27 * t) / (237.3 + t));
+	double satPress = 610.78f * glm::exp((17.27 * t) / (237.3 + t));
+
+	return satPress;
 }
+
 //calculates nucleation
 double Nucleation::CalcNucleation(double t, double waterPress)
 {
@@ -91,7 +90,8 @@ double Nucleation::CalcNucleation(double t, double waterPress)
 	double S = waterPress / CalcPressureSat(t);
 
 	double inside = -(16.0f * glm::pi<double>() / 3.0f)
-		* (glm::pow(v1, 2.0) * glm::pow(sigma, 3.0));
+		* (glm::pow(v1, 2.0) * glm::pow(sigma, 3.0))
+	 / (glm::pow(kb * t, 3.0) * glm::pow(glm::log(S), 2.0));
 
 	double j = glm::sqrt(2.0 * sigma / (glm::pi<double>() * m1)) * (v1 * glm::pow(N, 2.0) / S) * glm::exp(inside);
 

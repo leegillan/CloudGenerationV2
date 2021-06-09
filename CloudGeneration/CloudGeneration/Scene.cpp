@@ -89,18 +89,6 @@ void Scene::Init(Input* in)
 		basicShader->SetUniform1f("randNumber0to1[" + std::to_string(i) + "]", randNumber[i]);
 	}
 
-	//Nucleation variable passes to shader
-	float sigma = 72.75e-3;
-	float dalton = 1.66053906660e-27;
-	float m1 = 18.02 * dalton;                  //m1 = 2.99e-23f * 1e-3f  Converted into SI
-	float v1 = 2.99e-23 * 1e-6;                 // converted into SI
-	float kb = 1.38e-23;
-
-	basicShader->SetUniform1f("uSigma", sigma);
-	basicShader->SetUniform1f("uM1", m1);
-	basicShader->SetUniform1f("uV1", v1);
-	basicShader->SetUniform1f("uKB", kb);
-	basicShader->SetUniform1f("uTemp", temp);
 	basicShader->SetUniform1f("curNucVal", 0.01);
 
 	usingNuc = 0;
@@ -108,8 +96,6 @@ void Scene::Init(Input* in)
 
 	drawInLine = 0;
 	basicShader->SetUniform1i("uRenderOption", drawInLine);
-
-	basicShader->Unbind();
 
 	//initialise nulceation calcs
 	nuc = new Nucleation();
@@ -120,34 +106,31 @@ void Scene::Init(Input* in)
 
 	//setup nucleation values to send to shader
 	nuc->CalcShaderValues();
+
+	shaderNucleation = nuc->GetShaderValues();
+
+	float nucleationDelta = shaderNucleation[99];
+	basicShader->SetUniform1f("uNucleationDelta", nucleationDelta);
+
 	for (int i = 0; i < 100; i++)
 	{
-		shaderNucleation[i] = nuc->GetShaderValues().at(i);
-		basicShader->SetUniform1i("nucleationValues[" + std::to_string(i) + "]", shaderNucleation[i]);
+		basicShader->SetUniform1f("uNucleationValues[" + std::to_string(i) + "]", (float)shaderNucleation[i]);
 	}
 
-	std::cout << "This is the end. Onto normal nuc values" << std::endl;
-	for (int i = 0; i < 25; i++)
-	{
-		std::cout << nucleation[i] << std::endl;
-	}
-
-	std::cout << "This is the end. Onto normal range" << std::endl;
+	basicShader->SetUniform1f("uNucleationValues[" + std::to_string(0) + "]", (float)1.2439344497070565e+33);
 
 	float deltaN = nucleation[24] - nucleation[1];
-
-	std::cout << deltaN << std::endl;
 
 	for (int j = 0; j < 24; j++)
 	{
 		nucleationRange[j] = (nucleation[j + 1] / deltaN);
-		std::cout << nucleationRange[j] << std::endl;
 	}
 
 	heightDifference = 0.001f;
 
 	passTime = true;
 
+	basicShader->Unbind();
 }
 
 //update scene
@@ -339,6 +322,11 @@ void Scene::ChangeCloudBoundaries()
 		boundaryY -= 0.1f;
 		RandomiseCloudLocations();
 	}
+
+	if (input->isKeyDown('y'))
+	{
+		std::cout << "break" << std::endl;
+	}
 }
 
 //render scene
@@ -391,7 +379,6 @@ void Scene::Draw(float timePassed)
 	}
 
 	float height = -0.5f;
-	int altitude = 0;
 	float nucVal = 0.0f;
 	int textureID = 0;
 
@@ -440,9 +427,6 @@ void Scene::Draw(float timePassed)
 		//Determine which altitude space the clouds are in and then send nucleation value
 		if ((i % (numOfPlanes / nucleation.size())) == 0.0)
 		{
-			altitude++;
-			basicShader->SetUniform1f("uAltitude", altitude);
-
 			nucVal = nucleationRange[nucleation.size() - (i / (numOfPlanes / nucleation.size()))];
 			basicShader->SetUniform1f("curNucVal", nucVal);
 		}
@@ -580,11 +564,18 @@ void Scene::CalculateFPS()
 {
 	frame++;
 	time = glutGet(GLUT_ELAPSED_TIME);
-
 	if (time - timebase > 1000)
 	{
-		sprintf_s(fps, "FPS: %4.2f", frame * 1000.0 / (time - timebase));
+		sprintf_s(fps, "%4.2f", frame * 1000.0 / (time - timebase));
 		timebase = time;
+
+		fpsCount += (time - timebase);
+		if (fpsCount <= 1)
+		{
+			std::cout << fps << std::endl;
+			fpsCount = 0;
+		}
+
 		frame = 0;
 	}
 }

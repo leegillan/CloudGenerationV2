@@ -75,7 +75,8 @@ protected:
 
 	std::vector<double> nucleation;
 	float nucleationRange[100];
-	float shaderNucleation[100];
+
+	std::vector<double> shaderNucleation;
 
 	//nucleation temp
 	float temp = 293.;
@@ -128,5 +129,7 @@ protected:
 
 	//Shader variables
 	int location = 0;
+
+	float fpsCount;
 };
 

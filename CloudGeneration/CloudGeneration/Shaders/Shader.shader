@@ -47,16 +47,12 @@ uniform sampler2D uTexture[5];
 
 uniform float curNucVal;
 uniform float randNumber0to1[10];
-uniform float nucleationValues[100];
+uniform float uNucleationValues[100];
+uniform float uNucleationDelta;
 uniform float uFTime;
 
 //Nucleation uniforms
 uniform int uUsingNuc;
-uniform float uTemp;
-uniform float uSigma;
-uniform float uM1;
-uniform float uV1;
-uniform float uKB;
 
 uniform int uRenderOption;
 
@@ -180,9 +176,9 @@ vec4 fbmNoiseTex(vec2 st, vec2 qTexCoordsX, vec2 qTexCoordsY, vec2 rTexCoordsX, 
     r.x = fbm(st + 1.0 * q + rTexCoordsX + offset + 0.15 * uFTime * 0.003, octaves, shift, false);
     r.y = fbm(st + 1.0 * q + rTexCoordsY + offset * uFTime * 0.003, octaves, shift, true);
 
-    float f = fbm(st + r, octaves, shift, true);
+    float f = fbm(st + r - (uFTime * 0.0005), octaves, shift, true);
 
-    vec4 fBmNoiseTex = vec4((f * f * f + .6 * f * f + .5) * colour.xyz, 1.0);
+    vec4 fBmNoiseTex = vec4((f * f + .6 * f * f + .5 * f * f * f) * colour.xyz, 1.0);
 
     return fBmNoiseTex;
 }
@@ -196,7 +192,7 @@ void Setupfbm(vec2 st, float scale, vec2 qTexCoordsX, vec2 qTexCoordsY, vec2 rTe
 
     float mixValue = MixValue(fbmSt, mixValueX, mixValueY);
 
-    colour = mix(colour, uColour, mixValue);   //background mix
+    //colour = mix(colour, uColour, mixValue);   //background mix
 }
 
 //sets up worley noise
@@ -212,26 +208,25 @@ void SetupWorley(vec2 st, float scale, int offset)
 
     float n = 1.0 - 1.5 * F1;
 
-    vec4 worleyNoiseTex = vec4(n * n * n * colour.xyz, 1.0);
+    vec4 worleyNoiseTex = vec4(n, n, n, 0.9);
 
     //checks if using nucleation is true // if not it uses the noise value as the function for alpha
     if (uUsingNuc == 1)
     {
-        float nuc = nucleationValues[int(F1 * 100)];
+        float nuc = uNucleationValues[int(F1 * 100)];
 
-        float nucleationDelta = 2.48787e+34;    //max nucleation from ((1 * 10000) * saturation pressure) when temp is 293 Kelvin
+        float nucleationRange = nuc / uNucleationDelta;     // nucleation delta = max nucleation from ((1 * 10000) * saturation pressure) when temp is 293 Kelvin
 
-        float nucleationRange = nuc / nucleationDelta;
-
-        worleyNoiseTex.a = nucleationRange;
+        worleyNoiseTex.a *= nucleationRange;
     }
     else
     {
-        worleyNoiseTex.a = F1;
+        worleyNoiseTex.a *= 0.5;
     }
-  
+    
+ 
     //mixes worley texture with current overrall texture
-    colour = mix(colour, worleyNoiseTex, 0.4);
+    colour = mix(colour, worleyNoiseTex, 0.5);
 }
 
 //Different textures have different paramaters to create diversity in the look
@@ -242,7 +237,7 @@ void Texture1()
 
     Setupfbm(vSt, 210., vec2(0.0), vec2(1.0), vec2(1.7, 9.2), vec2(8.3, 2.8), 0.126, 6, 100.0, 3, 9);
 
-    SetupWorley(vSt, 30., 61);
+    //SetupWorley(vSt, 30., 61);
 }
 void Texture2()
 {
@@ -251,7 +246,7 @@ void Texture2()
 
     Setupfbm(vSt, 350., vec2(-0.150, 0.430), vec2(1.0), vec2(-0.340, 0.420), vec2(-0.400, -0.500), 0.0126, 7, 200.0, 4, 1);
 
-    SetupWorley(vSt, 70., 15);
+    //SetupWorley(vSt, 70., 15);
 }
 void Texture3()
 {
@@ -260,7 +255,7 @@ void Texture3()
 
     Setupfbm(vSt, 310., vec2(0.), vec2(-0.750, 0.750), vec2(0.680, -0.910), vec2(0.670, 0.380), 0.326, 8, 150.0, 9, 0);
 
-    SetupWorley(vSt, 50., 28);
+   // SetupWorley(vSt, 50., 28);
 }
 void Texture4()
 {
@@ -269,7 +264,7 @@ void Texture4()
   
     Setupfbm(vSt, 270., vec2(0.), vec2(1.), vec2(-0.960, 0.660), vec2(0.2), 0.05, 7, 300.0, 9, 8);
 
-    SetupWorley(vSt, 43., 49);
+    ///SetupWorley(vSt, 43., 49);
 }
 void Texture5()
 {
@@ -278,7 +273,7 @@ void Texture5()
 
     Setupfbm(vSt, 240., vec2(1.), vec2(-0.470, -0.530), vec2(0.), vec2(0.520, -0.590), 0.2, 4, 180.0, 2, 2);
 
-    SetupWorley(vSt, 60., 0);
+    //SetupWorley(vSt, 60., 0);
 }
 
 void main()
